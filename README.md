@@ -1,3 +1,6 @@
+非NSS固件,原碼:https://github.com/tsg2k2/openwrt
+交換機需要files文件夾下腳本進行初始化,記得給予權限
+
 ![OpenWrt logo](include/logo.png)
 
 OpenWrt Project is a Linux operating system targeting embedded devices. Instead
