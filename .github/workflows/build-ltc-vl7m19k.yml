@@ -16,7 +16,7 @@ on:
       release_type:
         description: 'Release Type'
         required: true
-        default: 'none'
+        default: 'release'
         type: choice
         options:
           - none
@@ -32,7 +32,7 @@ concurrency:
 
 env:
   CONFIG_SEED: ${{ inputs.config_seed || 'ltc_vl7m19k.config' }}
-  RELEASE_TYPE: ${{ inputs.release_type || 'none' }}
+  RELEASE_TYPE: ${{ inputs.release_type || 'release' }}
   TARGET_DIR: bin/targets/mediatek/filogic
   DEVICE: ltc_vl7m19k
 
