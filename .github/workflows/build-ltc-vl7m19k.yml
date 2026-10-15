@@ -1,9 +1,9 @@
 name: Build LTC Velo7 Max firmware
 
 on:
-  push:
-    branches:
-      - ltc_vl7m19k
+  schedule:
+    # 03:00 UTC+8
+    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       config_seed:
