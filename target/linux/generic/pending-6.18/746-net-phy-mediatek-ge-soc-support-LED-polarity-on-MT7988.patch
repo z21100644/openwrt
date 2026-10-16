@@ -1,0 +1,27 @@
+From: Claude <noreply@anthropic.com>
+Date: Fri, 16 Oct 2026 02:30:00 +0000
+Subject: [PATCH] net: phy: mediatek-ge-soc: support LED polarity on MT7988
+
+The MT7988 PHY driver derives the polarity of LED0 from the bootstrap
+register and hard-codes that of LED1 to what the reference board uses.
+Boards that wire the LEDs differently end up with LEDs that are lit
+while the port is down and dark while it is up, e.g. the LTC Velo7 Max,
+on which LAN2's LED1 and LAN3's LED0 are inverted.
+
+The register field is the same as on AN7581, so hook up
+an7581_phy_led_polarity_set() for MT7988 too. phylib applies the
+active-low/active-high properties of the LED nodes after the driver's
+probe, so a polarity set in the device tree overrides the derived one,
+and boards without these properties keep the current behaviour.
+
+---
+--- a/drivers/net/phy/mediatek/mtk-ge-soc.c
++++ b/drivers/net/phy/mediatek/mtk-ge-soc.c
+@@ -1504,6 +1504,7 @@ static struct phy_driver mtk_socphy_driv
+ 		.led_hw_is_supported = mt798x_phy_led_hw_is_supported,
+ 		.led_hw_control_set = mt798x_phy_led_hw_control_set,
+ 		.led_hw_control_get = mt798x_phy_led_hw_control_get,
++		.led_polarity_set = an7581_phy_led_polarity_set,
+ 	},
+ 	{
+ 		PHY_ID_MATCH_EXACT(MTK_GPHY_ID_AN7581),
