@@ -6,22 +6,65 @@ The MT7988 PHY driver derives the polarity of LED0 from the bootstrap
 register and hard-codes that of LED1 to what the reference board uses.
 Boards that wire the LEDs differently end up with LEDs that are lit
 while the port is down and dark while it is up, e.g. the LTC Velo7 Max,
-on which LAN2's LED1 and LAN3's LED0 are inverted.
+whose green LEDs on LED0 are active high and orange LEDs on LED1 active
+low on every port, which the derived polarities get wrong for LAN2's
+LED1 and LAN3's LED0.
 
-The register field is the same as on AN7581, so hook up
-an7581_phy_led_polarity_set() for MT7988 too. phylib applies the
-active-low/active-high properties of the LED nodes after the driver's
-probe, so a polarity set in the device tree overrides the derived one,
-and boards without these properties keep the current behaviour.
+Implement led_polarity_set() for MT7988. phylib applies the active-low
+and active-high properties of the LED nodes after the driver's probe,
+so a polarity given in the device tree overrides the derived one, and
+boards without these properties keep the current behaviour.
+
+On MT7988, MTK_PHY_LED_ON_POLARITY makes the pin drive high for an LED
+that is on: mt7988_phy_led_get_polarity() sets it for an LED0 strapped
+to GND, and setting it on the Velo7 Max lights its active-high LEDs.
+This is the opposite of what an7581_phy_led_polarity_set() maps the
+bit to, so that one cannot be reused.
 
 ---
 --- a/drivers/net/phy/mediatek/mtk-ge-soc.c
 +++ b/drivers/net/phy/mediatek/mtk-ge-soc.c
-@@ -1504,6 +1504,7 @@ static struct phy_driver mtk_socphy_driv
+@@ -1298,6 +1298,35 @@ static bool mt7988_phy_led_get_polarity(
+ 	return false;
+ }
+ 
++/* MTK_PHY_LED_ON_POLARITY makes the LED pin drive high while the LED is on,
++ * as mt7988_phy_led_get_polarity() sets it for the LED0 strapped to GND.
++ */
++static int mt7988_phy_led_polarity_set(struct phy_device *phydev, int index,
++				       unsigned long modes)
++{
++	u16 val = 0;
++	u32 mode;
++
++	if (index >= MTK_PHY_MAX_LEDS)
++		return -EINVAL;
++
++	for_each_set_bit(mode, &modes, __PHY_LED_MODES_NUM) {
++		switch (mode) {
++		case PHY_LED_ACTIVE_HIGH:
++			val = MTK_PHY_LED_ON_POLARITY;
++			break;
++		case PHY_LED_ACTIVE_LOW:
++			break;
++		default:
++			return -EINVAL;
++		}
++	}
++
++	return phy_modify_mmd(phydev, MDIO_MMD_VEND2, index ?
++			      MTK_PHY_LED1_ON_CTRL : MTK_PHY_LED0_ON_CTRL,
++			      MTK_PHY_LED_ON_POLARITY, val);
++}
++
+ static int mt7988_phy_fix_leds_polarities(struct phy_device *phydev)
+ {
+ 	struct pinctrl *pinctrl;
+@@ -1504,6 +1533,7 @@ static struct phy_driver mtk_socphy_driv
  		.led_hw_is_supported = mt798x_phy_led_hw_is_supported,
  		.led_hw_control_set = mt798x_phy_led_hw_control_set,
  		.led_hw_control_get = mt798x_phy_led_hw_control_get,
-+		.led_polarity_set = an7581_phy_led_polarity_set,
++		.led_polarity_set = mt7988_phy_led_polarity_set,
  	},
  	{
  		PHY_ID_MATCH_EXACT(MTK_GPHY_ID_AN7581),
