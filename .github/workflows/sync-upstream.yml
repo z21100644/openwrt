@@ -1,0 +1,77 @@
+name: Sync Upstream OpenWrt
+
+on:
+  schedule:
+    # 02:00 UTC+8; Auto-Clean and the firmware build follow this
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ltc_vl7m19k
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/openwrt/openwrt.git 2>/dev/null || true
+          git remote set-url upstream https://github.com/openwrt/openwrt.git
+
+      - name: Fetch upstream
+        run: git fetch --no-tags upstream main
+
+      - name: Check for updates
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          REMOTE=$(git rev-parse upstream/main)
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "No updates available (upstream: ${REMOTE:0:7}, local: ${LOCAL:0:7})"
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Updates available: ${LOCAL:0:7} -> ${REMOTE:0:7}"
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          git merge --no-ff --no-commit upstream/main || true
+          git rev-parse -q --verify MERGE_HEAD >/dev/null
+
+          # This branch keeps only its own workflows, so drop whatever
+          # upstream changes or adds below .github/workflows
+          git rm -rfq --ignore-unmatch -- .github/workflows
+          git checkout HEAD -- .github/workflows
+
+          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            echo "::error::Merge failed. Conflicts need manual resolution."
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+          git commit -q --no-edit
+
+      - name: Push to origin
+        if: steps.check.outputs.has_updates == 'true'
+        run: git push origin ltc_vl7m19k
+
+      - name: Show result
+        if: always()
+        run: |
+          echo "=== Sync Result ==="
+          git log --oneline -5 || true
+          echo "=== Remote Status ==="
+          git remote -v || true
