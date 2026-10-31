@@ -65,6 +65,20 @@ ppp_exitcode_tostring()
 	esac
 }
 
+ppp_opt_quote() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+ppp_write_auth_file() {
+	local file="$1" user="$2" pass="$3"
+
+	(
+		umask 077
+		printf 'user "%s"\npassword "%s"\n' \
+			"$(ppp_opt_quote "$user")" "$(ppp_opt_quote "$pass")" > "$file"
+	)
+}
+
 ppp_generic_init_config() {
 	proto_config_add_string username
 	proto_config_add_string password
@@ -107,6 +121,9 @@ ppp_generic_setup() {
 		reqprefix=""
 		norelease=""
 	fi
+
+	[ "$(set -- $reqprefix; echo $#)" -gt 1 ] && \
+		logger -p warn -t ppp "$config: ignoring extra reqprefix values"
 
 	if [ "${demand:-0}" -gt 0 ]; then
 		demand="precompiled-active-filter /etc/ppp/filter demand idle $demand"
@@ -163,6 +180,14 @@ ppp_generic_setup() {
 		done
 	}
 
+	local optfile
+	[ -n "$username" ] && {
+		optfile="/var/run/pppd/$config.opts"
+		mkdir -p /var/run/pppd
+		ppp_write_auth_file "$optfile" "$username" "$password"
+		[ -n "$jail" ] && chown ppp "$optfile"
+	}
+
 	proto_run_command "$config" $jail /usr/sbin/pppd \
 		nodetach ipparam "$config" \
 		ifname "$pppname" \
@@ -170,9 +195,9 @@ ppp_generic_setup() {
 		${lcp_failure:+lcp-echo-interval $lcp_interval lcp-echo-failure $lcp_failure $lcp_adaptive} \
 		${ipv6:++ipv6} \
 		${autoipv6:+set AUTOIPV6=1} \
-		${reqprefix:+set REQPREFIX=$reqprefix} \
+		${reqprefix:+set "REQPREFIX=$reqprefix"} \
 		${norelease:+set NORELEASE=1} \
-		${ip6table:+set IP6TABLE=$ip6table} \
+		${ip6table:+set "IP6TABLE=$ip6table"} \
 		${peerdns:+set PEERDNS=$peerdns} \
 		${sourcefilter:+set NOSOURCEFILTER=1} \
 		${delegate:+set DELEGATE=0} \
@@ -180,7 +205,7 @@ ppp_generic_setup() {
 		usepeerdns \
 		$demand $persist maxfail $maxfail \
 		${holdoff:+holdoff "$holdoff"} \
-		${username:+user "$username" password "$password"} \
+		${optfile:+file "$optfile" net-init-script /lib/netifd/ppp-net-init} \
 		${connect:+connect "$connect"} \
 		${disconnect:+disconnect "$disconnect"} \
 		ip-up-script /lib/netifd/ppp-up \
@@ -194,6 +219,8 @@ ppp_generic_setup() {
 ppp_generic_teardown() {
 	local interface="$1"
 	local errorstring=$(ppp_exitcode_tostring $ERROR)
+
+	rm -f "/var/run/pppd/$interface.opts"
 
 	case "$ERROR" in
 		0)
