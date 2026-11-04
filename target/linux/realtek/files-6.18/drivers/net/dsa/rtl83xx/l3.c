@@ -94,6 +94,7 @@
 #include <net/nexthop.h>
 #include <uapi/linux/rtnetlink.h>
 
+#include "fdb.h"
 #include "l2.h"
 #include "l3.h"
 #include "pie.h"
@@ -1090,15 +1091,26 @@ static int otto_l3_alloc_router_mac(struct otto_l3_ctrl *ctrl, u64 mac)
 		return -1;
 	}
 
-	m.valid = true;
-	m.mac = mac;
-	m.p_type = 0; /* An individual port, not a trunk port */
-	m.p_id = 0x3f;			/* Listen on any port */
-	m.p_id_mask = 0;
-	m.vid = 0;			/* Listen on any VLAN... */
-	m.vid_mask = 0;			/* ... so mask needs to be 0 */
-	m.mac_mask = 0xffffffffffffULL;	/* We want an exact match of the interface MAC */
-	m.action = ROUTE_ACT_FORWARD;	/* Route the packet */
+	/* Written whole rather than field by field, because the scan above left
+	 * m holding whatever the last entry it read did, and a mask carried
+	 * over from another entry narrows what this one matches. p_mask is the
+	 * one that bites: on a family that programs it, such as the RTL931x, a
+	 * leftover 1 turns "any port" into a particular port type. Nothing
+	 * clears L3_ROUTER_MAC at setup, so the leftover can be the
+	 * bootloader's.
+	 */
+	m = (struct otto_l3_router_mac){
+		.valid = true,
+		.mac = mac,
+		.p_type = 0,		/* An individual port, not a trunk port */
+		.p_mask = false,	/* ... and do not match on that at all */
+		.p_id = 0x3f,		/* Listen on any port */
+		.p_id_mask = 0,
+		.vid = 0,		/* Listen on any VLAN... */
+		.vid_mask = 0,		/* ... so mask needs to be 0 */
+		.mac_mask = 0xffffffffffffULL,	/* Exact match of the interface MAC */
+		.action = ROUTE_ACT_FORWARD,	/* Route the packet */
+	};
 	ctrl->cfg->set_router_mac(ctrl, free_mac, &m);
 	set_bit(free_mac, ctrl->router_mac_bm);
 
@@ -2027,7 +2039,7 @@ static void otto_l3_route_update_hw(struct otto_l3_ctrl *ctrl, struct otto_l3_ro
 
 	/* A route that forwards and gets a new gateway MAC traps while its
 	 * next hop moves over, or it would forward through the L2 entry
-	 * otto_l2_nexthop_add() releases.
+	 * otto_fdb_nexthop_add() releases.
 	 */
 	if (!first && mac != r->nh.mac && r->attr.action == ROUTE_ACT_FORWARD) {
 		r->attr.action = ROUTE_ACT_TRAP2CPU;
@@ -2092,7 +2104,7 @@ static void otto_l3_route_update_hw(struct otto_l3_ctrl *ctrl, struct otto_l3_ro
 	r->nh.dmac_id = dmac;
 
 	/* Update ROUTING table: map gateway-mac and switch-mac id to route id */
-	no_l2 = otto_l2_nexthop_add(priv, &r->nh);
+	no_l2 = otto_fdb_nexthop_add(priv, &r->nh);
 	if (!no_l2)
 		r->nh.l2_installed = true;
 
@@ -2249,7 +2261,7 @@ static int otto_l3_nexthop_update(struct otto_l3_ctrl *ctrl, u8 type, int ifinde
 			continue;
 
 		if (valid && r->hw_forward && r->nh.mac == mac &&
-		    otto_l2_nexthop_current(ctrl->priv, &r->nh))
+		    otto_fdb_nexthop_current(ctrl->priv, &r->nh))
 			continue;
 
 		if (valid)
@@ -2762,7 +2774,7 @@ static void otto_l3_route_teardown(struct otto_l3_ctrl *ctrl, struct otto_l3_rou
 	 */
 	if (r->is_host_route || !ctrl->prefix_rows_stale) {
 		if (r->nh.l2_installed)
-			otto_l2_nexthop_del(priv, &r->nh);
+			otto_fdb_nexthop_del(priv, &r->nh);
 
 		dev_dbg(ctrl->dev, "releasing packet counter %d\n", r->pr.packet_cntr);
 		otto_stats_packet_cntr_free(priv, r->pr.packet_cntr);
@@ -2964,11 +2976,16 @@ static int otto_l3_fib_add_v4(struct otto_l3_ctrl *ctrl, struct fib_entry_notifi
 	}
 
 	/* A route through a device outside the switch is the CPU's, and so is
-	 * an address of the box on such a device
+	 * an address of the box on such a device. Neither is a failure:
+	 * otto_l3_fib_trap_v4() gives the destination a row that traps, so the
+	 * CPU gets the traffic. An address put straight on a port rather than
+	 * on a bridge over it looks like this, which every boot does before the
+	 * bridge exists.
 	 */
 	port = otto_l3_port_dev_lower_find(ndev, ctrl);
 	if (port < 0) {
-		dev_err(ctrl->dev, "lower interface %s not found\n", ndev->name);
+		dev_dbg(ctrl->dev, "no switch port under %s, trapping instead\n",
+			ndev->name);
 		otto_l3_fib_trap_v4(ctrl, info);
 		return -ENODEV;
 	}
