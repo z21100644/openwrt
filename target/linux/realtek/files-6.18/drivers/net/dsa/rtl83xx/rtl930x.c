@@ -69,7 +69,7 @@
 /* get shift for given led in any set */
 #define RTL930X_LED_SET_LEDX_SHIFT(x) (16 * (x % 2))
 
-void rtldsa_930x_print_matrix(struct otto_dsa_priv *priv)
+static void rtldsa_930x_print_matrix(struct otto_dsa_priv *priv)
 {
 	int tbl = otto_table_acquire(RTL9300_TBL_PORT_ISO_CTRL);
 	u32 v;
@@ -492,7 +492,7 @@ const struct rtldsa_config rtldsa_930x_cfg = {
 	.set_receive_management_action = rtldsa_930x_set_receive_management_action,
 	.queue_sched_set = otto_qos_930x_queue_sched_set,
 	.red_set = otto_qos_930x_red_set,
-	.red_drops_update = otto_qos_930x_red_drops_update,
+	.queue_drops_update = otto_qos_930x_queue_drops_update,
 	.egress_shaper_set = otto_tc_930x_egress_shaper_set,
 	.qos_init = otto_qos_930x_init,
 	.pri_sel_port_pri = RTL930X_PRI_SEL_PORT_PRI(0),
